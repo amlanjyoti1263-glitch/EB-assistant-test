@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build EV Assistant APK
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -22,39 +22,44 @@ jobs:
 
       - name: Extract Android project
         run: |
-          mkdir -p project
-          unzip -o EV_Assistant_Mobile_Voice_Fixed.zip -d project
+          mkdir extracted
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ZIP file not found!"
+            exit 1
+          fi
+
+          echo "Extracting: $ZIP_FILE"
+          unzip -o "$ZIP_FILE" -d extracted
 
       - name: Find Android project
         run: |
-          SETTINGS=$(find project -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
+          PROJECT_DIR=$(find extracted -name gradlew -type f | head -n 1 | xargs dirname)
 
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: Android project not found"
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "gradlew not found!"
+            echo "Searching for settings.gradle..."
+            find extracted -name "settings.gradle*" -o -name "build.gradle*"
             exit 1
           fi
 
-          echo "Found: $SETTINGS"
-          PROJECT_DIR=$(dirname "$SETTINGS")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "Android project found at: $PROJECT_DIR"
 
-      - name: Build APK
+      - name: Make Gradle executable
+        run: chmod +x "$PROJECT_DIR/gradlew"
+
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Find APK
         run: |
-          cd "$PROJECT_DIR"
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace
-          else
-            echo "ERROR: gradlew not found"
-            exit 1
-          fi
+          find "$PROJECT_DIR" -name "*.apk" -type f
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: EV-Assistant-APK
-          path: |
-            **/build/outputs/apk/**/*.apk
-            **/build/outputs/apk/*.apk
-          if-no-files-found: error
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
